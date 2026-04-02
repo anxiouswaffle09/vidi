@@ -5,3 +5,6 @@
 
 ## Task 2: Config Module
 - [x] Completed
+
+## Task 3: Output Module
+- [x] Completed

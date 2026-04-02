@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -190,8 +190,10 @@ def transcript(
         if vtt_path:
             vtt_content = vtt_path.read_text(encoding="utf-8")
             segments = parse_vtt_captions(vtt_content)
+        shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
     else:
-        typer.echo("yt-dlp not found — using Gemini transcription as fallback")
+        typer.echo(get_install_instructions("yt-dlp"))
+        typer.echo("\nUsing Gemini transcription as fallback...")
 
     # Fallback to Gemini transcription
     if not segments:
@@ -318,6 +320,7 @@ def analyze(
                 if vtt_path:
                     vtt_content = vtt_path.read_text(encoding="utf-8")
                     segments = parse_vtt_captions(vtt_content)
+                shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
             if not segments:
                 response = model.generate_content(build_transcript_prompt(url))
                 segments = parse_transcript_response(response.text)

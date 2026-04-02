@@ -146,7 +146,7 @@ Sourced from yt-dlp captions (preferred) or Gemini transcription (fallback).
 
 **`frames/*.jpg`:**
 
-One frame per timestamp. Filename format: `{M}m{SS}s.jpg` (e.g., `3m15s.jpg`). Frame selection: grab ~5 candidates within ±1 second window, select the sharpest using ffmpeg scene detection / blur metrics.
+One frame per timestamp. Filename format: `{M}m{SS}s.jpg` (e.g., `3m15s.jpg`). Extracted at the exact timestamp Gemini identifies. Future improvement: grab ~5 candidates within ±1 second window and select the sharpest using ffmpeg scene detection / blur metrics.
 
 **`.session.json`:**
 

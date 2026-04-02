@@ -30,3 +30,9 @@
 - subprocess audit: all 3 subprocess.run calls PASS on all 5 checks (list args, no shell, no interpolation, capture_output, standalone URLs)
 - input validation: TOML injection fixed in config.py (added _toml_escape)
 - dependency note: google-generativeai deprecated, migration to google-genai documented but deferred
+
+## Task 10: Code Review and Final Polish
+- [x] Completed
+- spec review: 5 issues found, 1 fixed (transcript dep hint), 1 spec updated (frame selection wording), 3 assessed as non-issues
+- code quality review: 12 findings, 4 fixed (TOML key injection, escape tests, unused import, tmp_captions cleanup), rest deferred to v2
+- final state: 69 tests passing, 0 semgrep findings

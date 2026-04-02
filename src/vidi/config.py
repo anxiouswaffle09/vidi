@@ -28,7 +28,12 @@ def _toml_escape(value: str) -> str:
     return value
 
 
+_VALID_CONFIG_KEYS = {"gemini_key", "youtube_key"}
+
+
 def save_config(key: str, value: str) -> None:
+    if key not in _VALID_CONFIG_KEYS:
+        raise ValueError(f"Unknown config key: {key}. Valid keys: {', '.join(sorted(_VALID_CONFIG_KEYS))}")
     path = get_config_path()
     config = load_config()
 

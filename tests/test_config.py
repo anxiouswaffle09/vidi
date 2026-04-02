@@ -75,3 +75,27 @@ def test_mask_key():
     assert mask_key("abcdefghij") == "abcd...ghij"
     assert mask_key("abc") == "***"
     assert mask_key(None) == "(not set)"
+
+
+def test_save_config_escapes_special_chars_in_value(tmp_path):
+    config_file = tmp_path / "config.toml"
+    with patch("vidi.config.get_config_path", return_value=config_file):
+        save_config("gemini_key", 'key"with"quotes')
+    content = config_file.read_text()
+    assert '"' not in content.split("=")[1].strip().strip('"') or '\\"' in content
+
+
+def test_save_config_rejects_invalid_key(tmp_path):
+    config_file = tmp_path / "config.toml"
+    with patch("vidi.config.get_config_path", return_value=config_file):
+        with pytest.raises(ValueError, match="Unknown config key"):
+            save_config("malicious_key", "value")
+
+
+def test_save_config_roundtrips_with_special_value(tmp_path):
+    config_file = tmp_path / "config.toml"
+    with patch("vidi.config.get_config_path", return_value=config_file):
+        save_config("gemini_key", 'has"quotes\\and\\backslashes')
+    with patch("vidi.config.get_config_path", return_value=config_file):
+        config = load_config()
+    assert config["api"]["gemini_key"] == 'has"quotes\\and\\backslashes'

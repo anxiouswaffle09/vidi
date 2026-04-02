@@ -2,3 +2,6 @@
 
 ## Task 1: Project Scaffolding
 - [x] Completed
+
+## Task 2: Config Module
+- [x] Completed

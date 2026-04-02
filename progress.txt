@@ -1,0 +1,4 @@
+# vidi Implementation Progress
+
+## Task 1: Project Scaffolding
+- [x] Completed

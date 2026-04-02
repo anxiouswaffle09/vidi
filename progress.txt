@@ -23,3 +23,10 @@
 
 ## Task 8: CLI Command — analyze (orchestrator)
 - [x] Completed
+
+## Task 9: Full Security Audit
+- [x] Completed
+- semgrep: 0 findings across all modules
+- subprocess audit: all 3 subprocess.run calls PASS on all 5 checks (list args, no shell, no interpolation, capture_output, standalone URLs)
+- input validation: TOML injection fixed in config.py (added _toml_escape)
+- dependency note: google-generativeai deprecated, migration to google-genai documented but deferred

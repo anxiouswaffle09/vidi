@@ -18,6 +18,16 @@ def load_config() -> dict:
         return tomllib.load(f)
 
 
+def _toml_escape(value: str) -> str:
+    """Escape a string for use inside a TOML double-quoted basic string."""
+    value = value.replace("\\", "\\\\")
+    value = value.replace('"', '\\"')
+    value = value.replace("\n", "\\n")
+    value = value.replace("\r", "\\r")
+    value = value.replace("\t", "\\t")
+    return value
+
+
 def save_config(key: str, value: str) -> None:
     path = get_config_path()
     config = load_config()
@@ -29,7 +39,7 @@ def save_config(key: str, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["[api]\n"]
     for k, v in config["api"].items():
-        lines.append(f'{k} = "{v}"\n')
+        lines.append(f'{k} = "{_toml_escape(v)}"\n')
     path.write_text("".join(lines))
 
 

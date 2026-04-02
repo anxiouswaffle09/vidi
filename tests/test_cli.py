@@ -145,6 +145,34 @@ class TestFramesCommand:
         assert result.exit_code == 0
 
 
+class TestAnalyzeCommand:
+    @patch("vidi.cli.check_dependency", return_value=True)
+    @patch("vidi.cli.get_api_key", return_value="test-key")
+    @patch("vidi.cli.create_client")
+    @patch("vidi.cli.extract_video_id", return_value="abc123")
+    @patch("vidi.cli.build_output_dir")
+    def test_analyze_runs_all_steps(self, mock_dir, mock_id, mock_client, mock_key, mock_dep):
+        mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
+        mock_model = MagicMock()
+        mock_model.generate_content.side_effect = [
+            MagicMock(text="TITLE: Test\nCREATOR: Chan"),  # _resolve_output_dir
+            MagicMock(text="TITLE: Test\nCREATOR: Chan\nDURATION: 10:00\n\nOVERVIEW:\nA test.\n\nKEY POINTS:\n- Point\n\nCONCLUSIONS:\nDone."),  # summarize
+            MagicMock(text='[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]'),  # timestamps
+            MagicMock(text="[0:00] Hello world"),  # transcript (Gemini fallback)
+        ]
+        mock_client.return_value = mock_model
+
+        with patch("vidi.cli.write_file"):
+            with patch("vidi.cli.file_exists", return_value=False):
+                with patch("vidi.cli.download_captions", return_value=None):
+                    with patch("vidi.cli.get_stream_url", return_value="https://stream.url"):
+                        with patch("vidi.cli.extract_frame", return_value=True):
+                            result = runner.invoke(app, ["analyze", "https://youtube.com/watch?v=abc123"])
+
+        assert result.exit_code == 0
+        assert "summary" in result.output.lower()
+
+
 class TestAskCommand:
     @patch("vidi.cli.load_session", return_value=None)
     @patch("vidi.cli.save_session")

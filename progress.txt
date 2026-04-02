@@ -20,3 +20,6 @@
 
 ## Task 7: CLI Commands — transcript, frames, ask
 - [x] Completed
+
+## Task 8: CLI Command — analyze (orchestrator)
+- [x] Completed

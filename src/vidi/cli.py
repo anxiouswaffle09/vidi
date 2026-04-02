@@ -256,6 +256,116 @@ def frames(
 
 
 @app.command()
+def analyze(
+    url: str = typer.Argument(help="YouTube video URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing output"),
+) -> None:
+    """Run full analysis: summarize, timestamps, transcript, frames."""
+    key = _require_api_key()
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+
+    results = []
+
+    # Step 1: Summarize
+    try:
+        summary_path = output_dir / "summary.md"
+        if file_exists(summary_path) and not force:
+            results.append(("summary.md", True, "already exists"))
+        else:
+            response = model.generate_content(build_summary_prompt(url))
+            parsed = parse_summary_response(response.text)
+            md = format_summary_md(
+                title=parsed["title"] or video_id,
+                creator=parsed["creator"] or "Unknown",
+                duration=parsed["duration"] or "Unknown",
+                url=url,
+                overview=parsed["overview"],
+                key_points=parsed["key_points"],
+                conclusions=parsed["conclusions"],
+            )
+            write_file(summary_path, md)
+            results.append(("summary.md", True, None))
+    except Exception as e:
+        results.append(("summary.md", False, str(e)))
+
+    # Step 2: Timestamps
+    timestamps_path = output_dir / "timestamps.json"
+    ts_data = []
+    try:
+        if file_exists(timestamps_path) and not force:
+            ts_data = json.loads(timestamps_path.read_text(encoding="utf-8"))
+            results.append(("timestamps.json", True, "already exists"))
+        else:
+            response = model.generate_content(build_timestamps_prompt(url))
+            ts_data = parse_timestamps_response(response.text)
+            for entry in ts_data:
+                entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
+            write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+            results.append(("timestamps.json", True, f"{len(ts_data)} moments"))
+    except Exception as e:
+        results.append(("timestamps.json", False, str(e)))
+
+    # Step 3: Transcript
+    try:
+        transcript_path = output_dir / "transcript.md"
+        if file_exists(transcript_path) and not force:
+            results.append(("transcript.md", True, "already exists"))
+        else:
+            segments = None
+            if check_dependency("yt-dlp"):
+                vtt_path = download_captions(url, output_dir / ".tmp_captions")
+                if vtt_path:
+                    vtt_content = vtt_path.read_text(encoding="utf-8")
+                    segments = parse_vtt_captions(vtt_content)
+            if not segments:
+                response = model.generate_content(build_transcript_prompt(url))
+                segments = parse_transcript_response(response.text)
+            md = format_transcript_md(segments)
+            write_file(transcript_path, md)
+            results.append(("transcript.md", True, None))
+    except Exception as e:
+        results.append(("transcript.md", False, str(e)))
+
+    # Step 4: Frames
+    try:
+        if not ts_data:
+            results.append(("frames/", False, "no timestamps available"))
+        elif not check_dependency("yt-dlp") or not check_dependency("ffmpeg"):
+            results.append(("frames/", False, "yt-dlp or ffmpeg not installed"))
+        else:
+            stream_url = get_stream_url(url)
+            frames_dir = output_dir / "frames"
+            extracted = 0
+            for entry in ts_data:
+                frame_path = frames_dir / entry["frame"]
+                if file_exists(frame_path) and not force:
+                    extracted += 1
+                    continue
+                if extract_frame(stream_url, entry["seconds"], frame_path):
+                    extracted += 1
+            results.append(("frames/", True, f"{extracted} frames"))
+    except Exception as e:
+        results.append(("frames/", False, str(e)))
+
+    # Report
+    typer.echo(f"\nOutput: {output_dir}\n")
+    any_failed = False
+    for name, success, detail in results:
+        if success:
+            msg = f"✓ {name}"
+            if detail:
+                msg += f" ({detail})"
+            typer.echo(msg)
+        else:
+            typer.echo(f"✗ {name} — {detail}", err=True)
+            any_failed = True
+
+    if any_failed:
+        raise typer.Exit(1)
+
+
+@app.command()
 def ask(
     url: str = typer.Argument(help="YouTube video URL"),
     question: str = typer.Argument(help="Question about the video"),

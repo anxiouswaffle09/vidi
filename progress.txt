@@ -14,3 +14,6 @@
 
 ## Task 5: Gemini Module
 - [x] Completed
+
+## Task 6: CLI Commands — config, summarize, timestamps
+- [x] Completed

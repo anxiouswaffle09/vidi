@@ -1,13 +1,153 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Optional
+
 import typer
+
+from vidi.config import get_api_key, get_config_path, load_config, save_config, mask_key
+from vidi.gemini import (
+    build_summary_prompt,
+    build_timestamps_prompt,
+    create_client,
+    format_summary_md,
+    parse_summary_response,
+    parse_timestamps_response,
+)
+from vidi.output import (
+    build_output_dir,
+    extract_video_id,
+    file_exists,
+    write_file,
+)
+from vidi.video import format_timestamp
 
 app = typer.Typer(
     name="vidi",
     help="YouTube video analyzer powered by Google Gemini.",
     add_completion=False,
 )
+config_app = typer.Typer(help="Manage API keys and settings.")
+app.add_typer(config_app, name="config")
 
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
+
+
+# --- Config commands ---
+
+@config_app.command("path")
+def config_path() -> None:
+    """Print the config file path."""
+    typer.echo(get_config_path())
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Show current configuration (keys masked)."""
+    key = get_api_key(prompt_if_missing=False)
+    typer.echo(f"gemini_key: {mask_key(key)}")
+    config = load_config()
+    yt_key = config.get("api", {}).get("youtube_key")
+    if yt_key:
+        typer.echo(f"youtube_key: {mask_key(yt_key)}")
+
+
+@config_app.command("set")
+def config_set(key: str, value: str) -> None:
+    """Set a configuration value."""
+    save_config(key, value)
+    typer.echo(f"✓ {key} updated")
+
+
+# --- Helper ---
+
+def _resolve_output_dir(url: str, model: object) -> tuple[Path, str]:
+    """Get or create the output directory for a video."""
+    video_id = extract_video_id(url)
+    response = model.generate_content(
+        f"For this YouTube video: {url}\n\nReturn ONLY two lines:\nTITLE: the video title\nCREATOR: the channel name"
+    )
+    title, creator = video_id, "Unknown"
+    for line in response.text.strip().split("\n"):
+        if line.startswith("TITLE:"):
+            title = line[6:].strip()
+        elif line.startswith("CREATOR:"):
+            creator = line[8:].strip()
+    output_dir = build_output_dir(title, creator, video_id)
+    return output_dir, video_id
+
+
+def _require_api_key() -> str:
+    """Get API key or exit with error."""
+    key = get_api_key()
+    if not key:
+        typer.echo("✗ No Gemini API key configured. Run: vidi config set gemini_key YOUR_KEY", err=True)
+        raise typer.Exit(1)
+    return key
+
+
+# --- Gemini commands ---
+
+@app.command()
+def summarize(
+    url: str = typer.Argument(help="YouTube video URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing output"),
+) -> None:
+    """Summarize a YouTube video."""
+    key = _require_api_key()
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+    summary_path = output_dir / "summary.md"
+
+    if file_exists(summary_path) and not force:
+        typer.echo("✓ summary.md already exists (use --force to overwrite)")
+        return
+
+    typer.echo("Analyzing video...")
+    prompt = build_summary_prompt(url)
+    response = model.generate_content(prompt)
+    parsed = parse_summary_response(response.text)
+    md = format_summary_md(
+        title=parsed["title"] or video_id,
+        creator=parsed["creator"] or "Unknown",
+        duration=parsed["duration"] or "Unknown",
+        url=url,
+        overview=parsed["overview"],
+        key_points=parsed["key_points"],
+        conclusions=parsed["conclusions"],
+    )
+    write_file(summary_path, md)
+    typer.echo("✓ summary.md")
+
+
+@app.command()
+def timestamps(
+    url: str = typer.Argument(help="YouTube video URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing output"),
+) -> None:
+    """Extract key moments from a YouTube video."""
+    key = _require_api_key()
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+    timestamps_path = output_dir / "timestamps.json"
+
+    if file_exists(timestamps_path) and not force:
+        typer.echo("✓ timestamps.json already exists (use --force to overwrite)")
+        return
+
+    typer.echo("Identifying key moments...")
+    prompt = build_timestamps_prompt(url)
+    response = model.generate_content(prompt)
+    ts_data = parse_timestamps_response(response.text)
+
+    for entry in ts_data:
+        entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
+
+    write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+    typer.echo(f"✓ timestamps.json ({len(ts_data)} moments)")

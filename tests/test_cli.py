@@ -1,0 +1,100 @@
+import json
+from unittest.mock import patch, MagicMock
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from vidi.cli import app
+
+runner = CliRunner()
+
+
+class TestConfigCommands:
+    @patch("vidi.cli.get_config_path")
+    def test_config_path(self, mock_path):
+        mock_path.return_value = Path("/home/test/.config/vidi/config.toml")
+        result = runner.invoke(app, ["config", "path"])
+        assert result.exit_code == 0
+        assert "/home/test/.config/vidi/config.toml" in result.output
+
+    @patch("vidi.cli.load_config")
+    @patch("vidi.cli.get_api_key")
+    def test_config_show(self, mock_key, mock_config):
+        mock_key.return_value = "abcdefghij"
+        mock_config.return_value = {"api": {"gemini_key": "abcdefghij"}}
+        result = runner.invoke(app, ["config", "show"])
+        assert result.exit_code == 0
+        assert "abcd...ghij" in result.output
+
+    @patch("vidi.cli.save_config")
+    def test_config_set(self, mock_save):
+        result = runner.invoke(app, ["config", "set", "gemini_key", "new-key"])
+        assert result.exit_code == 0
+        mock_save.assert_called_once_with("gemini_key", "new-key")
+
+
+class TestSummarizeCommand:
+    @patch("vidi.cli.file_exists", return_value=False)
+    @patch("vidi.cli.get_api_key", return_value="test-key")
+    @patch("vidi.cli.create_client")
+    @patch("vidi.cli.extract_video_id", return_value="abc123")
+    @patch("vidi.cli.build_output_dir")
+    def test_summarize_calls_gemini(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+        mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
+        mock_model = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = """TITLE: Test Video
+CREATOR: Test Channel
+DURATION: 10:30
+
+OVERVIEW:
+This is a test video about testing.
+
+KEY POINTS:
+- First point
+- Second point
+
+CONCLUSIONS:
+Testing is important."""
+        mock_model.generate_content.return_value = mock_response
+        mock_client.return_value = mock_model
+
+        with patch("vidi.cli.write_file") as mock_write:
+            result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
+        assert result.exit_code == 0
+
+    @patch("vidi.cli.file_exists", return_value=True)
+    @patch("vidi.cli.get_api_key", return_value="test-key")
+    @patch("vidi.cli.create_client")
+    @patch("vidi.cli.extract_video_id", return_value="abc123")
+    @patch("vidi.cli.build_output_dir")
+    def test_summarize_skips_existing(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+        mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
+        mock_model = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "TITLE: Test Video\nCREATOR: Test Channel"
+        mock_model.generate_content.return_value = mock_response
+        mock_client.return_value = mock_model
+        result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
+        assert result.exit_code == 0
+        assert "exists" in result.output.lower() or "skip" in result.output.lower()
+
+
+class TestTimestampsCommand:
+    @patch("vidi.cli.file_exists", return_value=False)
+    @patch("vidi.cli.get_api_key", return_value="test-key")
+    @patch("vidi.cli.create_client")
+    @patch("vidi.cli.extract_video_id", return_value="abc123")
+    @patch("vidi.cli.build_output_dir")
+    def test_timestamps_writes_json(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+        mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
+        mock_model = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = '[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]'
+        mock_model.generate_content.return_value = mock_response
+        mock_client.return_value = mock_model
+
+        with patch("vidi.cli.write_file") as mock_write:
+            result = runner.invoke(app, ["timestamps", "https://youtube.com/watch?v=abc123"])
+        assert result.exit_code == 0

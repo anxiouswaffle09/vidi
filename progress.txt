@@ -11,3 +11,6 @@
 
 ## Task 4: Video Module
 - [x] Completed
+
+## Task 5: Gemini Module
+- [x] Completed

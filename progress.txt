@@ -8,3 +8,6 @@
 
 ## Task 3: Output Module
 - [x] Completed
+
+## Task 4: Video Module
+- [x] Completed

@@ -11,18 +11,31 @@ from vidi.config import get_api_key, get_config_path, load_config, save_config, 
 from vidi.gemini import (
     build_summary_prompt,
     build_timestamps_prompt,
+    build_transcript_prompt,
     create_client,
     format_summary_md,
+    format_transcript_md,
     parse_summary_response,
     parse_timestamps_response,
+    parse_transcript_response,
 )
 from vidi.output import (
     build_output_dir,
     extract_video_id,
     file_exists,
+    load_session,
+    save_session,
     write_file,
 )
-from vidi.video import format_timestamp
+from vidi.video import (
+    check_dependency,
+    download_captions,
+    extract_frame,
+    format_timestamp,
+    get_install_instructions,
+    get_stream_url,
+    parse_vtt_captions,
+)
 
 app = typer.Typer(
     name="vidi",
@@ -151,3 +164,125 @@ def timestamps(
 
     write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
     typer.echo(f"✓ timestamps.json ({len(ts_data)} moments)")
+
+
+@app.command()
+def transcript(
+    url: str = typer.Argument(help="YouTube video URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing output"),
+) -> None:
+    """Get video transcript (captions or Gemini fallback)."""
+    key = _require_api_key()
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+    transcript_path = output_dir / "transcript.md"
+
+    if file_exists(transcript_path) and not force:
+        typer.echo("✓ transcript.md already exists (use --force to overwrite)")
+        return
+
+    segments = None
+
+    # Try yt-dlp captions first
+    if check_dependency("yt-dlp"):
+        typer.echo("Downloading captions...")
+        vtt_path = download_captions(url, output_dir / ".tmp_captions")
+        if vtt_path:
+            vtt_content = vtt_path.read_text(encoding="utf-8")
+            segments = parse_vtt_captions(vtt_content)
+    else:
+        typer.echo("yt-dlp not found — using Gemini transcription as fallback")
+
+    # Fallback to Gemini transcription
+    if not segments:
+        typer.echo("Transcribing with Gemini...")
+        prompt = build_transcript_prompt(url)
+        response = model.generate_content(prompt)
+        segments = parse_transcript_response(response.text)
+
+    md = format_transcript_md(segments)
+    write_file(transcript_path, md)
+    typer.echo("✓ transcript.md")
+
+
+@app.command()
+def frames(
+    url: str = typer.Argument(help="YouTube video URL"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing output"),
+) -> None:
+    """Extract frames at key timestamps."""
+    key = _require_api_key()
+
+    for dep in ("yt-dlp", "ffmpeg"):
+        if not check_dependency(dep):
+            typer.echo(get_install_instructions(dep), err=True)
+            raise typer.Exit(1)
+
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+    frames_dir = output_dir / "frames"
+    timestamps_path = output_dir / "timestamps.json"
+
+    if not file_exists(timestamps_path):
+        typer.echo("Generating timestamps first...")
+        prompt = build_timestamps_prompt(url)
+        response = model.generate_content(prompt)
+        ts_data = parse_timestamps_response(response.text)
+        for entry in ts_data:
+            entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
+        write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+    else:
+        ts_data = json.loads(timestamps_path.read_text(encoding="utf-8"))
+
+    if not ts_data:
+        typer.echo("No timestamps found — nothing to extract.")
+        return
+
+    typer.echo("Getting stream URL...")
+    stream_url = get_stream_url(url)
+
+    extracted = 0
+    for entry in ts_data:
+        frame_path = frames_dir / entry["frame"]
+        if file_exists(frame_path) and not force:
+            extracted += 1
+            continue
+        if extract_frame(stream_url, entry["seconds"], frame_path):
+            extracted += 1
+        else:
+            typer.echo(f"  ✗ failed: {entry['frame']}", err=True)
+
+    typer.echo(f"✓ frames/ ({extracted} frames)")
+
+
+@app.command()
+def ask(
+    url: str = typer.Argument(help="YouTube video URL"),
+    question: str = typer.Argument(help="Question about the video"),
+    new: bool = typer.Option(False, "--new", help="Start a fresh session"),
+) -> None:
+    """Ask a question about a YouTube video."""
+    key = _require_api_key()
+    model = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, model)
+    session_path = output_dir / ".session.json"
+
+    if new and session_path.exists():
+        session_path.unlink()
+
+    session_data = load_session(session_path)
+
+    if session_data and session_data.get("history"):
+        chat = model.start_chat(history=session_data["history"])
+    else:
+        chat = model.start_chat(history=[])
+        chat.send_message(f"I want to ask questions about this YouTube video: {url}")
+
+    response = chat.send_message(question)
+    typer.echo(response.text)
+
+    save_session(session_path, {
+        "video_url": url,
+        "video_id": video_id,
+        "history": [{"role": m.role, "parts": [p.text for p in m.parts]} for m in chat.history],
+    })

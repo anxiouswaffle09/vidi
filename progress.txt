@@ -17,3 +17,6 @@
 
 ## Task 6: CLI Commands — config, summarize, timestamps
 - [x] Completed
+
+## Task 7: CLI Commands — transcript, frames, ask
+- [x] Completed

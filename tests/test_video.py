@@ -66,6 +66,78 @@ Welcome to the video
         result = parse_vtt_captions("WEBVTT\n\n")
         assert result == []
 
+    def test_handles_cue_ids(self):
+        vtt = """WEBVTT
+
+1
+00:00:01.000 --> 00:00:04.000
+Hello everyone
+
+2
+00:00:05.000 --> 00:00:08.000
+Welcome to the video
+"""
+        result = parse_vtt_captions(vtt)
+        assert len(result) == 2
+        assert result[0]["text"] == "Hello everyone"
+
+    def test_strips_html_tags(self):
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+<c.colorE5E5E5>Hello</c> <c.colorCCCCCC>everyone</c>
+"""
+        result = parse_vtt_captions(vtt)
+        assert result[0]["text"] == "Hello everyone"
+
+    def test_handles_positioning_metadata(self):
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:04.000 position:10% align:start size:80%
+Hello everyone
+"""
+        result = parse_vtt_captions(vtt)
+        assert len(result) == 1
+        assert result[0]["text"] == "Hello everyone"
+
+    def test_deduplicates_same_timestamp(self):
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+Hello
+
+00:00:01.000 --> 00:00:04.000
+Hello everyone
+"""
+        result = parse_vtt_captions(vtt)
+        assert len(result) == 1
+        assert result[0]["text"] == "Hello everyone"
+
+    def test_deduplicates_overlapping_auto_captions(self):
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Hello everyone
+
+00:00:02.500 --> 00:00:06.000
+Hello everyone welcome to the video
+"""
+        result = parse_vtt_captions(vtt)
+        assert len(result) == 1
+        assert result[0]["text"] == "Hello everyone welcome to the video"
+
+    def test_keeps_distinct_segments(self):
+        vtt = """WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Hello everyone
+
+00:00:05.000 --> 00:00:08.000
+Today we discuss Python
+"""
+        result = parse_vtt_captions(vtt)
+        assert len(result) == 2
+
 
 class TestDownloadCaptions:
     @patch("vidi.video.subprocess.run")

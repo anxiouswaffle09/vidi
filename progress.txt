@@ -47,3 +47,23 @@
 - tests/test_gemini.py: TestCreateClient updated, TestPrompts updated (URLs not in prompts), new tests for build_video_content, generate_video_content, generate_text_content
 - tests/test_cli.py: all mock chains updated to patch generate_video_content at vidi.cli level
 - final state: 74 tests passing, 0 semgrep findings
+
+## Task 12: Skip extra API call when output folder exists
+- [x] Completed
+- output.py: added find_existing_output_dir() — iterdir() with suffix check
+- cli.py: _resolve_output_dir short-circuits on existing folder
+- 78 tests passing
+
+## Task 13: Deduplicate analyze command
+- [x] Completed
+- cli.py: extracted _do_summarize, _do_timestamps, _do_transcript, _do_frames helpers
+- individual commands and analyze both call same helpers
+- net -22 lines, zero duplication
+- 78 tests passing
+
+## Task 14: Harden VTT parser
+- [x] Completed
+- video.py: parse_vtt_captions now handles cue IDs, HTML tags, positioning metadata, overlapping auto-captions
+- dedup pass: same-timestamp keeps longer, substring containment resolves incremental build-up
+- 6 new tests added
+- 84 tests passing

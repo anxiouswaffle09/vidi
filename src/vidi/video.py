@@ -50,7 +50,7 @@ def format_timestamp(seconds: int) -> str:
 
 
 def parse_vtt_captions(vtt_content: str) -> list[dict]:
-    segments = []
+    raw_segments = []
     blocks = vtt_content.strip().split("\n\n")
     for block in blocks:
         lines = block.strip().split("\n")
@@ -61,10 +61,28 @@ def parse_vtt_captions(vtt_content: str) -> list[dict]:
                 start_seconds = h * 3600 + m * 60 + s
                 text_lines = lines[i + 1 :]
                 text = " ".join(t.strip() for t in text_lines if t.strip())
+                text = re.sub(r"<[^>]+>", "", text).strip()
                 if text:
-                    segments.append({"start_seconds": start_seconds, "text": text})
+                    raw_segments.append({"start_seconds": start_seconds, "text": text})
                 break
-    return segments
+
+    if not raw_segments:
+        return []
+
+    deduped = [raw_segments[0]]
+    for seg in raw_segments[1:]:
+        prev = deduped[-1]
+        if seg["start_seconds"] == prev["start_seconds"]:
+            if len(seg["text"]) > len(prev["text"]):
+                deduped[-1] = seg
+        elif seg["text"] in prev["text"]:
+            continue
+        elif prev["text"] in seg["text"]:
+            deduped[-1] = seg
+        else:
+            deduped.append(seg)
+
+    return deduped
 
 
 def download_captions(url: str, output_dir: Path) -> Path | None:

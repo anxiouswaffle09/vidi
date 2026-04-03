@@ -171,7 +171,7 @@ def parse_summary_response(response_text: str) -> dict:
     lines = response_text.strip().split("\n")
 
     for line in lines:
-        stripped = line.strip()
+        stripped = re.sub(r"[*#]+", "", line.strip()).strip()
         if stripped.startswith("TITLE:"):
             result["title"] = stripped[6:].strip()
         elif stripped.startswith("CREATOR:"):

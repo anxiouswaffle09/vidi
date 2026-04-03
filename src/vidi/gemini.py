@@ -6,7 +6,7 @@ import re
 from google import genai
 from google.genai import types
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-3-flash-preview"
 
 
 def create_client(api_key: str) -> genai.Client:

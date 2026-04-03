@@ -36,3 +36,14 @@
 - spec review: 5 issues found, 1 fixed (transcript dep hint), 1 spec updated (frame selection wording), 3 assessed as non-issues
 - code quality review: 12 findings, 4 fixed (TOML key injection, escape tests, unused import, tmp_captions cleanup), rest deferred to v2
 - final state: 69 tests passing, 0 semgrep findings
+
+## Task 11: Migrate google-generativeai -> google-genai SDK
+- [x] Completed
+- pyproject.toml: dependency changed from google-generativeai>=0.8.0 to google-genai>=1.0.0
+- uv.lock: updated (removed 11 old packages, added 6 new packages; grpc stack gone)
+- gemini.py: rewritten — genai.Client, MODEL_NAME constant, build_video_content/generate_video_content/generate_text_content helpers, prompt builders no longer take url param
+- cli.py: all model.generate_content calls replaced with generate_video_content/generate_text_content; ask command uses client.chats.create
+- YouTube URLs now sent as FileData parts instead of embedded text — improved video analysis quality
+- tests/test_gemini.py: TestCreateClient updated, TestPrompts updated (URLs not in prompts), new tests for build_video_content, generate_video_content, generate_text_content
+- tests/test_cli.py: all mock chains updated to patch generate_video_content at vidi.cli level
+- final state: 74 tests passing, 0 semgrep findings

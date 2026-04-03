@@ -9,12 +9,15 @@ import typer
 
 from vidi.config import get_api_key, get_config_path, load_config, save_config, mask_key
 from vidi.gemini import (
+    MODEL_NAME,
     build_summary_prompt,
     build_timestamps_prompt,
     build_transcript_prompt,
     create_client,
     format_summary_md,
     format_transcript_md,
+    generate_text_content,
+    generate_video_content,
     parse_summary_response,
     parse_timestamps_response,
     parse_transcript_response,
@@ -80,14 +83,15 @@ def config_set(key: str, value: str) -> None:
 
 # --- Helper ---
 
-def _resolve_output_dir(url: str, model: object) -> tuple[Path, str]:
+def _resolve_output_dir(url: str, client: object) -> tuple[Path, str]:
     """Get or create the output directory for a video."""
     video_id = extract_video_id(url)
-    response = model.generate_content(
-        f"For this YouTube video: {url}\n\nReturn ONLY two lines:\nTITLE: the video title\nCREATOR: the channel name"
+    response_text = generate_video_content(
+        client, url,
+        "Return ONLY two lines:\nTITLE: the video title\nCREATOR: the channel name"
     )
     title, creator = video_id, "Unknown"
-    for line in response.text.strip().split("\n"):
+    for line in response_text.strip().split("\n"):
         if line.startswith("TITLE:"):
             title = line[6:].strip()
         elif line.startswith("CREATOR:"):
@@ -114,8 +118,8 @@ def summarize(
 ) -> None:
     """Summarize a YouTube video."""
     key = _require_api_key()
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
     summary_path = output_dir / "summary.md"
 
     if file_exists(summary_path) and not force:
@@ -123,9 +127,8 @@ def summarize(
         return
 
     typer.echo("Analyzing video...")
-    prompt = build_summary_prompt(url)
-    response = model.generate_content(prompt)
-    parsed = parse_summary_response(response.text)
+    response_text = generate_video_content(client, url, build_summary_prompt())
+    parsed = parse_summary_response(response_text)
     md = format_summary_md(
         title=parsed["title"] or video_id,
         creator=parsed["creator"] or "Unknown",
@@ -146,8 +149,8 @@ def timestamps(
 ) -> None:
     """Extract key moments from a YouTube video."""
     key = _require_api_key()
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
     timestamps_path = output_dir / "timestamps.json"
 
     if file_exists(timestamps_path) and not force:
@@ -155,9 +158,8 @@ def timestamps(
         return
 
     typer.echo("Identifying key moments...")
-    prompt = build_timestamps_prompt(url)
-    response = model.generate_content(prompt)
-    ts_data = parse_timestamps_response(response.text)
+    response_text = generate_video_content(client, url, build_timestamps_prompt())
+    ts_data = parse_timestamps_response(response_text)
 
     for entry in ts_data:
         entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
@@ -173,8 +175,8 @@ def transcript(
 ) -> None:
     """Get video transcript (captions or Gemini fallback)."""
     key = _require_api_key()
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
     transcript_path = output_dir / "transcript.md"
 
     if file_exists(transcript_path) and not force:
@@ -198,9 +200,8 @@ def transcript(
     # Fallback to Gemini transcription
     if not segments:
         typer.echo("Transcribing with Gemini...")
-        prompt = build_transcript_prompt(url)
-        response = model.generate_content(prompt)
-        segments = parse_transcript_response(response.text)
+        response_text = generate_video_content(client, url, build_transcript_prompt())
+        segments = parse_transcript_response(response_text)
 
     md = format_transcript_md(segments)
     write_file(transcript_path, md)
@@ -220,16 +221,15 @@ def frames(
             typer.echo(get_install_instructions(dep), err=True)
             raise typer.Exit(1)
 
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
     frames_dir = output_dir / "frames"
     timestamps_path = output_dir / "timestamps.json"
 
     if not file_exists(timestamps_path):
         typer.echo("Generating timestamps first...")
-        prompt = build_timestamps_prompt(url)
-        response = model.generate_content(prompt)
-        ts_data = parse_timestamps_response(response.text)
+        response_text = generate_video_content(client, url, build_timestamps_prompt())
+        ts_data = parse_timestamps_response(response_text)
         for entry in ts_data:
             entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
         write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
@@ -264,8 +264,8 @@ def analyze(
 ) -> None:
     """Run full analysis: summarize, timestamps, transcript, frames."""
     key = _require_api_key()
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
 
     results = []
 
@@ -275,8 +275,8 @@ def analyze(
         if file_exists(summary_path) and not force:
             results.append(("summary.md", True, "already exists"))
         else:
-            response = model.generate_content(build_summary_prompt(url))
-            parsed = parse_summary_response(response.text)
+            response_text = generate_video_content(client, url, build_summary_prompt())
+            parsed = parse_summary_response(response_text)
             md = format_summary_md(
                 title=parsed["title"] or video_id,
                 creator=parsed["creator"] or "Unknown",
@@ -299,8 +299,8 @@ def analyze(
             ts_data = json.loads(timestamps_path.read_text(encoding="utf-8"))
             results.append(("timestamps.json", True, "already exists"))
         else:
-            response = model.generate_content(build_timestamps_prompt(url))
-            ts_data = parse_timestamps_response(response.text)
+            response_text = generate_video_content(client, url, build_timestamps_prompt())
+            ts_data = parse_timestamps_response(response_text)
             for entry in ts_data:
                 entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
             write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
@@ -322,8 +322,8 @@ def analyze(
                     segments = parse_vtt_captions(vtt_content)
                 shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
             if not segments:
-                response = model.generate_content(build_transcript_prompt(url))
-                segments = parse_transcript_response(response.text)
+                response_text = generate_video_content(client, url, build_transcript_prompt())
+                segments = parse_transcript_response(response_text)
             md = format_transcript_md(segments)
             write_file(transcript_path, md)
             results.append(("transcript.md", True, None))
@@ -376,8 +376,8 @@ def ask(
 ) -> None:
     """Ask a question about a YouTube video."""
     key = _require_api_key()
-    model = create_client(key)
-    output_dir, video_id = _resolve_output_dir(url, model)
+    client = create_client(key)
+    output_dir, video_id = _resolve_output_dir(url, client)
     session_path = output_dir / ".session.json"
 
     if new and session_path.exists():
@@ -385,17 +385,27 @@ def ask(
 
     session_data = load_session(session_path)
 
-    if session_data and session_data.get("history"):
-        chat = model.start_chat(history=session_data["history"])
-    else:
-        chat = model.start_chat(history=[])
-        chat.send_message(f"I want to ask questions about this YouTube video: {url}")
+    chat = client.chats.create(model=MODEL_NAME)
 
-    response = chat.send_message(question)
+    if session_data and session_data.get("history"):
+        # Replay history into the chat by sending all previous messages
+        for msg in session_data["history"]:
+            if msg["role"] == "user":
+                chat.send_message(message=msg["parts"][0] if isinstance(msg["parts"], list) else msg["parts"])
+    else:
+        # New session: send video URL as context in first message
+        chat.send_message(message=f"I want to ask questions about this YouTube video: {url}")
+
+    response = chat.send_message(message=question)
     typer.echo(response.text)
+
+    history = []
+    for msg in chat.history:
+        parts = [p.text for p in msg.parts if hasattr(p, "text") and p.text]
+        history.append({"role": msg.role, "parts": parts})
 
     save_session(session_path, {
         "video_url": url,
         "video_id": video_id,
-        "history": [{"role": m.role, "parts": [p.text for p in m.parts]} for m in chat.history],
+        "history": history,
     })

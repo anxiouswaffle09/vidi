@@ -4,30 +4,81 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from vidi.gemini import (
+    MODEL_NAME,
     build_summary_prompt,
     build_timestamps_prompt,
     build_transcript_prompt,
-    parse_timestamps_response,
-    parse_transcript_response,
+    build_video_content,
+    create_client,
     format_summary_md,
     format_transcript_md,
+    generate_text_content,
+    generate_video_content,
     parse_summary_response,
-    create_client,
+    parse_timestamps_response,
+    parse_transcript_response,
 )
 
 
 class TestPrompts:
-    def test_summary_prompt_contains_url(self):
-        prompt = build_summary_prompt("https://youtube.com/watch?v=abc")
-        assert "https://youtube.com/watch?v=abc" in prompt
+    def test_summary_prompt_no_url(self):
+        prompt = build_summary_prompt()
+        assert "http" not in prompt
+        assert "TITLE:" in prompt
+        assert "CREATOR:" in prompt
 
-    def test_timestamps_prompt_contains_url(self):
-        prompt = build_timestamps_prompt("https://youtube.com/watch?v=abc")
-        assert "https://youtube.com/watch?v=abc" in prompt
+    def test_timestamps_prompt_no_url(self):
+        prompt = build_timestamps_prompt()
+        assert "http" not in prompt
+        assert "JSON" in prompt or "json" in prompt
 
-    def test_transcript_prompt_contains_url(self):
-        prompt = build_transcript_prompt("https://youtube.com/watch?v=abc")
-        assert "https://youtube.com/watch?v=abc" in prompt
+    def test_transcript_prompt_no_url(self):
+        prompt = build_transcript_prompt()
+        assert "http" not in prompt
+        assert "transcript" in prompt.lower()
+
+
+class TestBuildVideoContent:
+    def test_builds_content_with_file_data_and_text(self):
+        from google.genai import types
+        content = build_video_content("https://youtube.com/watch?v=abc", "Summarize this")
+        assert len(content.parts) == 2
+        assert content.parts[0].file_data.file_uri == "https://youtube.com/watch?v=abc"
+        assert content.parts[1].text == "Summarize this"
+
+    def test_returns_content_type(self):
+        from google.genai import types
+        content = build_video_content("https://youtube.com/watch?v=xyz", "Analyze")
+        assert isinstance(content, types.Content)
+
+
+class TestGenerateVideoContent:
+    def test_calls_generate_content_with_video(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(text="result text")
+        result = generate_video_content(mock_client, "https://youtube.com/watch?v=abc", "Prompt")
+        assert result == "result text"
+        mock_client.models.generate_content.assert_called_once()
+        call_kwargs = mock_client.models.generate_content.call_args
+        assert call_kwargs.kwargs["model"] == MODEL_NAME
+
+    def test_returns_response_text(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(text="video analysis")
+        result = generate_video_content(mock_client, "https://youtube.com/watch?v=abc", "Summarize")
+        assert result == "video analysis"
+
+
+class TestGenerateTextContent:
+    def test_calls_generate_content_with_text(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(text="text result")
+        result = generate_text_content(mock_client, "Hello")
+        assert result == "text result"
+        mock_client.models.generate_content.assert_called_once()
+        call_kwargs = mock_client.models.generate_content.call_args
+        assert call_kwargs.kwargs["model"] == MODEL_NAME
+        assert call_kwargs.kwargs["contents"] == "Hello"
 
 
 class TestParseTimestampsResponse:
@@ -140,10 +191,10 @@ Line two of overview."""
 
 
 class TestCreateClient:
-    @patch("vidi.gemini.genai")
-    def test_creates_client_with_key(self, mock_genai):
-        mock_model = MagicMock()
-        mock_genai.GenerativeModel.return_value = mock_model
+    @patch("vidi.gemini.genai.Client")
+    def test_creates_client_with_key(self, mock_client_class):
+        mock_client_instance = MagicMock()
+        mock_client_class.return_value = mock_client_instance
         client = create_client("test-key")
-        mock_genai.configure.assert_called_once_with(api_key="test-key")
-        assert client is mock_model
+        mock_client_class.assert_called_once_with(api_key="test-key")
+        assert client is mock_client_instance

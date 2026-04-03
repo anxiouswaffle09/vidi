@@ -40,11 +40,12 @@ class TestSummarizeCommand:
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
-    def test_summarize_calls_gemini(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    @patch("vidi.cli.generate_video_content")
+    def test_summarize_calls_gemini(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = """TITLE: Test Video
+        mock_gen.side_effect = [
+            "TITLE: Test Video\nCREATOR: Test Channel",  # _resolve_output_dir
+            """TITLE: Test Video
 CREATOR: Test Channel
 DURATION: 10:30
 
@@ -56,11 +57,10 @@ KEY POINTS:
 - Second point
 
 CONCLUSIONS:
-Testing is important."""
-        mock_model.generate_content.return_value = mock_response
-        mock_client.return_value = mock_model
+Testing is important.""",  # summarize
+        ]
 
-        with patch("vidi.cli.write_file") as mock_write:
+        with patch("vidi.cli.write_file"):
             result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
 
@@ -69,13 +69,10 @@ Testing is important."""
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
-    def test_summarize_skips_existing(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    @patch("vidi.cli.generate_video_content")
+    def test_summarize_skips_existing(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "TITLE: Test Video\nCREATOR: Test Channel"
-        mock_model.generate_content.return_value = mock_response
-        mock_client.return_value = mock_model
+        mock_gen.return_value = "TITLE: Test Video\nCREATOR: Test Channel"
         result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
         assert "exists" in result.output.lower() or "skip" in result.output.lower()
@@ -87,15 +84,15 @@ class TestTimestampsCommand:
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
-    def test_timestamps_writes_json(self, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    @patch("vidi.cli.generate_video_content")
+    def test_timestamps_writes_json(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = '[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]'
-        mock_model.generate_content.return_value = mock_response
-        mock_client.return_value = mock_model
+        mock_gen.side_effect = [
+            "TITLE: Test Video\nCREATOR: Test Channel",  # _resolve_output_dir
+            '[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]',  # timestamps
+        ]
 
-        with patch("vidi.cli.write_file") as mock_write:
+        with patch("vidi.cli.write_file"):
             result = runner.invoke(app, ["timestamps", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
 
@@ -107,14 +104,13 @@ class TestTranscriptCommand:
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.check_dependency", return_value=False)
-    def test_transcript_gemini_fallback(self, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    @patch("vidi.cli.generate_video_content")
+    def test_transcript_gemini_fallback(self, mock_gen, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = [
-            MagicMock(text="TITLE: Test\nCREATOR: Chan"),
-            MagicMock(text="[0:00] Hello everyone\n[0:15] Welcome"),
+        mock_gen.side_effect = [
+            "TITLE: Test\nCREATOR: Chan",  # _resolve_output_dir
+            "[0:00] Hello everyone\n[0:15] Welcome",  # transcript
         ]
-        mock_client.return_value = mock_model
         with patch("vidi.cli.write_file"):
             result = runner.invoke(app, ["transcript", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
@@ -129,11 +125,10 @@ class TestFramesCommand:
     @patch("vidi.cli.check_dependency", return_value=True)
     @patch("vidi.cli.get_stream_url", return_value="https://stream.url/video")
     @patch("vidi.cli.extract_frame", return_value=True)
-    def test_frames_extracts(self, mock_extract, mock_stream, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    @patch("vidi.cli.generate_video_content")
+    def test_frames_extracts(self, mock_gen, mock_extract, mock_stream, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value = MagicMock(text="TITLE: Test\nCREATOR: Chan")
-        mock_client.return_value = mock_model
+        mock_gen.return_value = "TITLE: Test\nCREATOR: Chan"
 
         def exists_side_effect(path):
             return "timestamps.json" in str(path)
@@ -151,16 +146,15 @@ class TestAnalyzeCommand:
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
-    def test_analyze_runs_all_steps(self, mock_dir, mock_id, mock_client, mock_key, mock_dep):
+    @patch("vidi.cli.generate_video_content")
+    def test_analyze_runs_all_steps(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_dep):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = [
-            MagicMock(text="TITLE: Test\nCREATOR: Chan"),  # _resolve_output_dir
-            MagicMock(text="TITLE: Test\nCREATOR: Chan\nDURATION: 10:00\n\nOVERVIEW:\nA test.\n\nKEY POINTS:\n- Point\n\nCONCLUSIONS:\nDone."),  # summarize
-            MagicMock(text='[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]'),  # timestamps
-            MagicMock(text="[0:00] Hello world"),  # transcript (Gemini fallback)
+        mock_gen.side_effect = [
+            "TITLE: Test\nCREATOR: Chan",  # _resolve_output_dir
+            "TITLE: Test\nCREATOR: Chan\nDURATION: 10:00\n\nOVERVIEW:\nA test.\n\nKEY POINTS:\n- Point\n\nCONCLUSIONS:\nDone.",  # summarize
+            '[{"time": "1:30", "seconds": 90, "label": "intro", "type": "topic"}]',  # timestamps
+            "[0:00] Hello world",  # transcript (Gemini fallback)
         ]
-        mock_client.return_value = mock_model
 
         with patch("vidi.cli.write_file"):
             with patch("vidi.cli.file_exists", return_value=False):
@@ -180,15 +174,22 @@ class TestAskCommand:
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
-    def test_ask_prints_answer(self, mock_dir, mock_id, mock_client, mock_key, mock_save, mock_load):
+    @patch("vidi.cli.generate_video_content")
+    def test_ask_prints_answer(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_save, mock_load):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value = MagicMock(text="TITLE: Test\nCREATOR: Chan")
+        mock_gen.return_value = "TITLE: Test\nCREATOR: Chan"
+
+        mock_client_instance = MagicMock()
         mock_chat = MagicMock()
         mock_chat.send_message.return_value = MagicMock(text="The video discusses React 19.")
-        mock_chat.history = []
-        mock_model.start_chat.return_value = mock_chat
-        mock_client.return_value = mock_model
+        mock_part = MagicMock()
+        mock_part.text = "The video discusses React 19."
+        mock_history_msg = MagicMock()
+        mock_history_msg.role = "model"
+        mock_history_msg.parts = [mock_part]
+        mock_chat.history = [mock_history_msg]
+        mock_client_instance.chats.create.return_value = mock_chat
+        mock_client.return_value = mock_client_instance
 
         result = runner.invoke(app, ["ask", "https://youtube.com/watch?v=abc123", "What framework?"])
         assert result.exit_code == 0

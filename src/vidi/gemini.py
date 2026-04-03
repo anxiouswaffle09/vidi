@@ -3,16 +3,47 @@ from __future__ import annotations
 import json
 import re
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+
+MODEL_NAME = "gemini-2.0-flash"
 
 
-def create_client(api_key: str, model_name: str = "gemini-2.0-flash") -> genai.GenerativeModel:
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+def create_client(api_key: str) -> genai.Client:
+    return genai.Client(api_key=api_key)
 
 
-def build_summary_prompt(url: str) -> str:
-    return f"""Analyze this YouTube video: {url}
+def build_video_content(url: str, prompt: str) -> types.Content:
+    """Build content with YouTube video + text prompt for Gemini."""
+    return types.Content(
+        parts=[
+            types.Part(file_data=types.FileData(file_uri=url)),
+            types.Part(text=prompt),
+        ]
+    )
+
+
+def generate_video_content(client: genai.Client, url: str, prompt: str) -> str:
+    """Send a YouTube video + prompt to Gemini and return the response text."""
+    content = build_video_content(url, prompt)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=content,
+    )
+    return response.text
+
+
+def generate_text_content(client: genai.Client, prompt: str) -> str:
+    """Send a text-only prompt to Gemini and return the response text."""
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt,
+    )
+    return response.text
+
+
+def build_summary_prompt() -> str:
+    return """Analyze this YouTube video.
 
 Provide a structured analysis with these exact sections:
 
@@ -25,16 +56,14 @@ Two to three sentences describing what this video is about.
 
 KEY POINTS:
 - First key point with context
-- Second key point with context
-- Third key point with context
 (Include as many key points as appropriate)
 
 CONCLUSIONS:
 What the video concludes or recommends."""
 
 
-def build_timestamps_prompt(url: str) -> str:
-    return f"""Analyze this YouTube video: {url}
+def build_timestamps_prompt() -> str:
+    return """Analyze this YouTube video.
 
 Identify the key moments/timestamps in this video. For each moment, provide:
 - time: the timestamp in M:SS or H:MM:SS format
@@ -45,16 +74,16 @@ Identify the key moments/timestamps in this video. For each moment, provide:
 Return the results as a JSON array. Example format:
 ```json
 [
-  {{"time": "1:30", "seconds": 90, "label": "introduces the main concept", "type": "topic"}},
-  {{"time": "3:45", "seconds": 225, "label": "shows architecture diagram", "type": "visual"}}
+  {"time": "1:30", "seconds": 90, "label": "introduces the main concept", "type": "topic"},
+  {"time": "3:45", "seconds": 225, "label": "shows architecture diagram", "type": "visual"}
 ]
 ```
 
 Return ONLY the JSON array, no other text."""
 
 
-def build_transcript_prompt(url: str) -> str:
-    return f"""Transcribe this YouTube video: {url}
+def build_transcript_prompt() -> str:
+    return """Transcribe this YouTube video.
 
 Provide a timestamped transcript in this exact format:
 [M:SS] Text spoken at this timestamp

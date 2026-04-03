@@ -117,6 +117,68 @@ def _require_api_key() -> str:
     return key
 
 
+# --- Step helpers (always do the work; callers handle skip/force/reporting) ---
+
+def _do_summarize(client: object, url: str, output_dir: Path, video_id: str) -> None:
+    """Generate and write summary.md."""
+    summary_path = output_dir / "summary.md"
+    response_text = generate_video_content(client, url, build_summary_prompt())
+    parsed = parse_summary_response(response_text)
+    md = format_summary_md(
+        title=parsed["title"] or video_id,
+        creator=parsed["creator"] or "Unknown",
+        duration=parsed["duration"] or "Unknown",
+        url=url,
+        overview=parsed["overview"],
+        key_points=parsed["key_points"],
+        conclusions=parsed["conclusions"],
+    )
+    write_file(summary_path, md)
+
+
+def _do_timestamps(client: object, url: str, output_dir: Path) -> list:
+    """Generate and write timestamps.json. Returns ts_data."""
+    timestamps_path = output_dir / "timestamps.json"
+    response_text = generate_video_content(client, url, build_timestamps_prompt())
+    ts_data = parse_timestamps_response(response_text)
+    for entry in ts_data:
+        entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
+    write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+    return ts_data
+
+
+def _do_transcript(client: object, url: str, output_dir: Path) -> None:
+    """Generate and write transcript.md (yt-dlp with Gemini fallback)."""
+    transcript_path = output_dir / "transcript.md"
+    segments = None
+    if check_dependency("yt-dlp"):
+        vtt_path = download_captions(url, output_dir / ".tmp_captions")
+        if vtt_path:
+            vtt_content = vtt_path.read_text(encoding="utf-8")
+            segments = parse_vtt_captions(vtt_content)
+        shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
+    if not segments:
+        response_text = generate_video_content(client, url, build_transcript_prompt())
+        segments = parse_transcript_response(response_text)
+    md = format_transcript_md(segments)
+    write_file(transcript_path, md)
+
+
+def _do_frames(url: str, output_dir: Path, ts_data: list, force: bool) -> int:
+    """Extract frames for each entry in ts_data. Returns count of extracted frames."""
+    stream_url = get_stream_url(url)
+    frames_dir = output_dir / "frames"
+    extracted = 0
+    for entry in ts_data:
+        frame_path = frames_dir / entry["frame"]
+        if file_exists(frame_path) and not force:
+            extracted += 1
+            continue
+        if extract_frame(stream_url, entry["seconds"], frame_path):
+            extracted += 1
+    return extracted
+
+
 # --- Gemini commands ---
 
 @app.command()
@@ -135,18 +197,7 @@ def summarize(
         return
 
     typer.echo("Analyzing video...")
-    response_text = generate_video_content(client, url, build_summary_prompt())
-    parsed = parse_summary_response(response_text)
-    md = format_summary_md(
-        title=parsed["title"] or video_id,
-        creator=parsed["creator"] or "Unknown",
-        duration=parsed["duration"] or "Unknown",
-        url=url,
-        overview=parsed["overview"],
-        key_points=parsed["key_points"],
-        conclusions=parsed["conclusions"],
-    )
-    write_file(summary_path, md)
+    _do_summarize(client, url, output_dir, video_id)
     typer.echo("✓ summary.md")
 
 
@@ -166,13 +217,7 @@ def timestamps(
         return
 
     typer.echo("Identifying key moments...")
-    response_text = generate_video_content(client, url, build_timestamps_prompt())
-    ts_data = parse_timestamps_response(response_text)
-
-    for entry in ts_data:
-        entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
-
-    write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+    ts_data = _do_timestamps(client, url, output_dir)
     typer.echo(f"✓ timestamps.json ({len(ts_data)} moments)")
 
 
@@ -191,28 +236,13 @@ def transcript(
         typer.echo("✓ transcript.md already exists (use --force to overwrite)")
         return
 
-    segments = None
-
-    # Try yt-dlp captions first
     if check_dependency("yt-dlp"):
         typer.echo("Downloading captions...")
-        vtt_path = download_captions(url, output_dir / ".tmp_captions")
-        if vtt_path:
-            vtt_content = vtt_path.read_text(encoding="utf-8")
-            segments = parse_vtt_captions(vtt_content)
-        shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
     else:
         typer.echo(get_install_instructions("yt-dlp"))
         typer.echo("\nUsing Gemini transcription as fallback...")
 
-    # Fallback to Gemini transcription
-    if not segments:
-        typer.echo("Transcribing with Gemini...")
-        response_text = generate_video_content(client, url, build_transcript_prompt())
-        segments = parse_transcript_response(response_text)
-
-    md = format_transcript_md(segments)
-    write_file(transcript_path, md)
+    _do_transcript(client, url, output_dir)
     typer.echo("✓ transcript.md")
 
 
@@ -231,16 +261,11 @@ def frames(
 
     client = create_client(key)
     output_dir, video_id = _resolve_output_dir(url, client)
-    frames_dir = output_dir / "frames"
     timestamps_path = output_dir / "timestamps.json"
 
     if not file_exists(timestamps_path):
         typer.echo("Generating timestamps first...")
-        response_text = generate_video_content(client, url, build_timestamps_prompt())
-        ts_data = parse_timestamps_response(response_text)
-        for entry in ts_data:
-            entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
-        write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+        ts_data = _do_timestamps(client, url, output_dir)
     else:
         ts_data = json.loads(timestamps_path.read_text(encoding="utf-8"))
 
@@ -249,19 +274,7 @@ def frames(
         return
 
     typer.echo("Getting stream URL...")
-    stream_url = get_stream_url(url)
-
-    extracted = 0
-    for entry in ts_data:
-        frame_path = frames_dir / entry["frame"]
-        if file_exists(frame_path) and not force:
-            extracted += 1
-            continue
-        if extract_frame(stream_url, entry["seconds"], frame_path):
-            extracted += 1
-        else:
-            typer.echo(f"  ✗ failed: {entry['frame']}", err=True)
-
+    extracted = _do_frames(url, output_dir, ts_data, force)
     typer.echo(f"✓ frames/ ({extracted} frames)")
 
 
@@ -283,18 +296,7 @@ def analyze(
         if file_exists(summary_path) and not force:
             results.append(("summary.md", True, "already exists"))
         else:
-            response_text = generate_video_content(client, url, build_summary_prompt())
-            parsed = parse_summary_response(response_text)
-            md = format_summary_md(
-                title=parsed["title"] or video_id,
-                creator=parsed["creator"] or "Unknown",
-                duration=parsed["duration"] or "Unknown",
-                url=url,
-                overview=parsed["overview"],
-                key_points=parsed["key_points"],
-                conclusions=parsed["conclusions"],
-            )
-            write_file(summary_path, md)
+            _do_summarize(client, url, output_dir, video_id)
             results.append(("summary.md", True, None))
     except Exception as e:
         results.append(("summary.md", False, str(e)))
@@ -307,11 +309,7 @@ def analyze(
             ts_data = json.loads(timestamps_path.read_text(encoding="utf-8"))
             results.append(("timestamps.json", True, "already exists"))
         else:
-            response_text = generate_video_content(client, url, build_timestamps_prompt())
-            ts_data = parse_timestamps_response(response_text)
-            for entry in ts_data:
-                entry["frame"] = f"{format_timestamp(entry['seconds'])}.jpg"
-            write_file(timestamps_path, json.dumps(ts_data, indent=2) + "\n")
+            ts_data = _do_timestamps(client, url, output_dir)
             results.append(("timestamps.json", True, f"{len(ts_data)} moments"))
     except Exception as e:
         results.append(("timestamps.json", False, str(e)))
@@ -322,18 +320,7 @@ def analyze(
         if file_exists(transcript_path) and not force:
             results.append(("transcript.md", True, "already exists"))
         else:
-            segments = None
-            if check_dependency("yt-dlp"):
-                vtt_path = download_captions(url, output_dir / ".tmp_captions")
-                if vtt_path:
-                    vtt_content = vtt_path.read_text(encoding="utf-8")
-                    segments = parse_vtt_captions(vtt_content)
-                shutil.rmtree(output_dir / ".tmp_captions", ignore_errors=True)
-            if not segments:
-                response_text = generate_video_content(client, url, build_transcript_prompt())
-                segments = parse_transcript_response(response_text)
-            md = format_transcript_md(segments)
-            write_file(transcript_path, md)
+            _do_transcript(client, url, output_dir)
             results.append(("transcript.md", True, None))
     except Exception as e:
         results.append(("transcript.md", False, str(e)))
@@ -345,16 +332,7 @@ def analyze(
         elif not check_dependency("yt-dlp") or not check_dependency("ffmpeg"):
             results.append(("frames/", False, "yt-dlp or ffmpeg not installed"))
         else:
-            stream_url = get_stream_url(url)
-            frames_dir = output_dir / "frames"
-            extracted = 0
-            for entry in ts_data:
-                frame_path = frames_dir / entry["frame"]
-                if file_exists(frame_path) and not force:
-                    extracted += 1
-                    continue
-                if extract_frame(stream_url, entry["seconds"], frame_path):
-                    extracted += 1
+            extracted = _do_frames(url, output_dir, ts_data, force)
             results.append(("frames/", True, f"{extracted} frames"))
     except Exception as e:
         results.append(("frames/", False, str(e)))

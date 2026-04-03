@@ -26,6 +26,7 @@ from vidi.output import (
     build_output_dir,
     extract_video_id,
     file_exists,
+    find_existing_output_dir,
     load_session,
     save_session,
     write_file,
@@ -86,6 +87,13 @@ def config_set(key: str, value: str) -> None:
 def _resolve_output_dir(url: str, client: object) -> tuple[Path, str]:
     """Get or create the output directory for a video."""
     video_id = extract_video_id(url)
+
+    # Reuse existing folder if found — skip the API call
+    existing = find_existing_output_dir(video_id)
+    if existing:
+        return existing, video_id
+
+    # No existing folder — ask Gemini for title/creator
     response_text = generate_video_content(
         client, url,
         "Return ONLY two lines:\nTITLE: the video title\nCREATOR: the channel name"

@@ -48,6 +48,20 @@ def build_output_dir(
     return base_dir / "vidi" / folder_name
 
 
+def find_existing_output_dir(video_id: str, base_dir: Path | None = None) -> Path | None:
+    """Find an existing output directory for a video ID."""
+    if base_dir is None:
+        base_dir = Path.cwd()
+    vidi_dir = base_dir / "vidi"
+    if not vidi_dir.is_dir():
+        return None
+    suffix = f"[{video_id}]"
+    for entry in vidi_dir.iterdir():
+        if entry.is_dir() and entry.name.endswith(suffix):
+            return entry
+    return None
+
+
 def write_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")

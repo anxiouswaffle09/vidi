@@ -5,6 +5,7 @@ import pytest
 
 from vidi.output import (
     extract_video_id,
+    find_existing_output_dir,
     sanitize_filename,
     build_output_dir,
     write_file,
@@ -92,6 +93,23 @@ class TestFileExists:
     def test_returns_false_for_missing(self, tmp_path):
         path = tmp_path / "nope.txt"
         assert file_exists(path) is False
+
+
+class TestFindExistingOutputDir:
+    def test_finds_existing_dir(self, tmp_path):
+        video_dir = tmp_path / "vidi" / "Some Video - Creator [abc123]"
+        video_dir.mkdir(parents=True)
+        result = find_existing_output_dir("abc123", base_dir=tmp_path)
+        assert result == video_dir
+
+    def test_returns_none_when_not_found(self, tmp_path):
+        (tmp_path / "vidi").mkdir()
+        result = find_existing_output_dir("nonexistent", base_dir=tmp_path)
+        assert result is None
+
+    def test_returns_none_when_no_vidi_dir(self, tmp_path):
+        result = find_existing_output_dir("abc123", base_dir=tmp_path)
+        assert result is None
 
 
 class TestSession:

@@ -35,13 +35,14 @@ class TestConfigCommands:
 
 
 class TestSummarizeCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.file_exists", return_value=False)
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.generate_video_content")
-    def test_summarize_calls_gemini(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    def test_summarize_calls_gemini(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.side_effect = [
             "TITLE: Test Video\nCREATOR: Test Channel",  # _resolve_output_dir
@@ -64,28 +65,61 @@ Testing is important.""",  # summarize
             result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
 
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.file_exists", return_value=True)
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.generate_video_content")
-    def test_summarize_skips_existing(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    def test_summarize_skips_existing(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.return_value = "TITLE: Test Video\nCREATOR: Test Channel"
         result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
         assert result.exit_code == 0
         assert "exists" in result.output.lower() or "skip" in result.output.lower()
 
+    @patch("vidi.cli.find_existing_output_dir")
+    @patch("vidi.cli.file_exists", return_value=False)
+    @patch("vidi.cli.get_api_key", return_value="test-key")
+    @patch("vidi.cli.create_client")
+    @patch("vidi.cli.extract_video_id", return_value="abc123")
+    @patch("vidi.cli.generate_video_content")
+    def test_summarize_uses_existing_dir(self, mock_gen, mock_id, mock_client, mock_key, mock_exists, mock_find):
+        existing = Path("/tmp/vidi/Cached Video - Chan [abc123]")
+        mock_find.return_value = existing
+        mock_gen.side_effect = [
+            """TITLE: Test Video
+CREATOR: Test Channel
+DURATION: 10:30
+
+OVERVIEW:
+This is a test video about testing.
+
+KEY POINTS:
+- First point
+- Second point
+
+CONCLUSIONS:
+Testing is important.""",
+        ]
+
+        with patch("vidi.cli.write_file"):
+            result = runner.invoke(app, ["summarize", "https://youtube.com/watch?v=abc123"])
+        assert result.exit_code == 0
+        # Only one Gemini call (the summarize itself) — no title/creator call
+        assert mock_gen.call_count == 1
+
 
 class TestTimestampsCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.file_exists", return_value=False)
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.generate_video_content")
-    def test_timestamps_writes_json(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    def test_timestamps_writes_json(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_exists, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.side_effect = [
             "TITLE: Test Video\nCREATOR: Test Channel",  # _resolve_output_dir
@@ -98,6 +132,7 @@ class TestTimestampsCommand:
 
 
 class TestTranscriptCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.file_exists", return_value=False)
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
@@ -105,7 +140,7 @@ class TestTranscriptCommand:
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.check_dependency", return_value=False)
     @patch("vidi.cli.generate_video_content")
-    def test_transcript_gemini_fallback(self, mock_gen, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    def test_transcript_gemini_fallback(self, mock_gen, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.side_effect = [
             "TITLE: Test\nCREATOR: Chan",  # _resolve_output_dir
@@ -117,6 +152,7 @@ class TestTranscriptCommand:
 
 
 class TestFramesCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.file_exists")
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
@@ -126,7 +162,7 @@ class TestFramesCommand:
     @patch("vidi.cli.get_stream_url", return_value="https://stream.url/video")
     @patch("vidi.cli.extract_frame", return_value=True)
     @patch("vidi.cli.generate_video_content")
-    def test_frames_extracts(self, mock_gen, mock_extract, mock_stream, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists):
+    def test_frames_extracts(self, mock_gen, mock_extract, mock_stream, mock_dep, mock_dir, mock_id, mock_client, mock_key, mock_exists, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.return_value = "TITLE: Test\nCREATOR: Chan"
 
@@ -141,13 +177,14 @@ class TestFramesCommand:
 
 
 class TestAnalyzeCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.check_dependency", return_value=True)
     @patch("vidi.cli.get_api_key", return_value="test-key")
     @patch("vidi.cli.create_client")
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.generate_video_content")
-    def test_analyze_runs_all_steps(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_dep):
+    def test_analyze_runs_all_steps(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_dep, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.side_effect = [
             "TITLE: Test\nCREATOR: Chan",  # _resolve_output_dir
@@ -168,6 +205,7 @@ class TestAnalyzeCommand:
 
 
 class TestAskCommand:
+    @patch("vidi.cli.find_existing_output_dir", return_value=None)
     @patch("vidi.cli.load_session", return_value=None)
     @patch("vidi.cli.save_session")
     @patch("vidi.cli.get_api_key", return_value="test-key")
@@ -175,7 +213,7 @@ class TestAskCommand:
     @patch("vidi.cli.extract_video_id", return_value="abc123")
     @patch("vidi.cli.build_output_dir")
     @patch("vidi.cli.generate_video_content")
-    def test_ask_prints_answer(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_save, mock_load):
+    def test_ask_prints_answer(self, mock_gen, mock_dir, mock_id, mock_client, mock_key, mock_save, mock_load, mock_find):
         mock_dir.return_value = Path("/tmp/vidi/Test [abc123]")
         mock_gen.return_value = "TITLE: Test\nCREATOR: Chan"
 
